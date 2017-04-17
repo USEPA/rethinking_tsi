@@ -31,14 +31,7 @@ data(LakeTrophicModelling)
 #Clean Up Data - Complete Cases
 predictors_all <- predictors_all[predictors_all!="DATE_COL"]
 
-MC.PA <- vector(mode="numeric", 1148)
-MC.PA[ltmData[,"MCYST_TL_UGL"]>0.05] <- 1
-MC.PA[ltmData[,"MCYST_TL_UGL"]<0.051] <- 0
-MC.PA <- as.factor(MC.PA)
-MC.PA <- as.vector(MC.PA)
-MC.PA <- as.numeric(MC.PA)
-
-all_dat <- data.frame(ltmData[predictors_all], MC.PA,LogCHLA=log10(ltmData$CHLA))
+all_dat <- data.frame(ltmData[predictors_all],LogCHLA=log10(ltmData$CHLA))
 row.names(all_dat)<-ltmData$NLA_ID
 all_dat <- all_dat[complete.cases(all_dat),]  
 ##################################################
@@ -58,8 +51,6 @@ gis_dat_PTL <- gis_dat_PTL[complete.cases(gis_dat_PTL),]
 # Variable Selection
 all_vs <- varsel_regression_rf(all_dat$LogCHLA,all_dat[,names(all_dat)!="LogCHLA"]
                                , ntree=5000,prog=T)  
-all_vs <- varsel_regression_rf(all_dat$MC.PA,all_dat[,names(all_dat)!="MC.PA"]
-                               , ntree=5000,prog=T)  
 
 # Used plot to identify approxiamte minimum
 all_vs_plot <- varsel_plot(all_vs)
@@ -68,10 +59,6 @@ all_vars_select <- unlist(all_vs$vars[19])
 
 # Final Model - all variables
 all_rf<-randomForest(y=all_dat$LogCHLA,x=all_dat[,all_vars_select]
-                     , ntree=5000, importance=TRUE, proximity=TRUE
-                     , keep.forest=TRUE,keep.inbag=TRUE)
-
-all_rf<-randomForest(y=all_dat$MC.PA,x=all_dat[,all_vars_select]
                      , ntree=5000, importance=TRUE, proximity=TRUE
                      , keep.forest=TRUE,keep.inbag=TRUE)
 ##################################################
@@ -235,6 +222,9 @@ c2.5_AllVar <- kappa_AllVar[2]
 c3.5_AllVar <- kappa_AllVar[3]
 sigma_AllVar <- 1/1
 
+# Figure
+# Graphical presentation of the POLR model.
+# The x-axis is the trophic state index, the y-axis is each lake's trophic state, vertical lines show estimated cutpoints, and curve shows expected trophic state as estimated using ordered logistic regression.
 par(mar=c(3,3,0.25,0.25), mgp=c(1.5,0.25,0), tck=-0.005)
 plot(0, 0, xlim=c(-10,15), ylim=c(1,4), xlab="Trophic State Index", ylab="",
      type="n", axes=F)
@@ -249,9 +239,6 @@ with(NLA2007,
             jitter.binary(as.numeric(ordered(Model$TS_CHLA_4))), col="cyan4"))
 
 ######################################################
-BCG.polr5 <- polr(ordered(A.Priori.Class) ~ I06+I19+I28,
-                  data=MaineInv.Training)
-## I have ordered class A, B, C, and NA
 summary(TSI.polrAllVar)
 beta_AllVar <- coef(TSI.polrAllVar)
 kappa_AllVar <- TSI.polrAllVar$zeta
@@ -272,10 +259,9 @@ pB <- invlogit(kappa_AllVar[2] - Ibcg) -  invlogit(kappa_AllVar[1] - Ibcg)
 pC <- invlogit(kappa_AllVar[3] - Ibcg) -  invlogit(kappa_AllVar[2] - Ibcg)
 pNA <- 1.0 - invlogit(kappa_AllVar[3] - Ibcg)
 
-#postscript(file=paste(plotDIR, "MainePolr1.eps", sep="/"),
-#           height=3, width=3.75, horizontal=F)
-tikz(file=paste(plotDIR, "MaineIbcg.tex", sep="/"),
-     height=3.5, width=5)
+# Figure
+# Graphical presentation of the POLR model. 
+# The x-axis is the trophic state index, the y-axis is the probability of being classified into one of the 4 trophic state classes, and the vertical lines and blue bars are the cutpoints $\pm$ one standard error.
 par(mar=c(3,3,2,0.25), mgp=c(1.5,0.5,0), tck=-0.01)
 plot(range(Ibcg), c(0,1), type="n",     xlab="Tropic State Index", ylab="Prob")
 polygon(x=c(c1.5_AllVar-se.c[1], c1.5_AllVar+se.c[1], c1.5_AllVar+se.c[1],c1.5_AllVar-se.c[1]),
@@ -293,7 +279,6 @@ lines(Ibcg, pC, lty=3)
 lines(Ibcg, pNA, lty=4)
 legend(-6, 0.5, legend=c("Oligo", "Meso","Eu", "Hyper"),
        lty=1:4, cex=0.75, bty="n")
-dev.off()
 #################################################
 # Evaluation
 #################################################
@@ -327,7 +312,7 @@ CM.AllVar$overall["Accuracy"]
 CMTable <- CM.AllVar$table
 xtable(CMTable)
 #################################################
-# 
+# JAGS Model
 #################################################
 set.seed(100)
 #set up the initializations 
@@ -339,13 +324,13 @@ for (k in 1:3){
 
 inits <- function () {list("cutpt_raw" = cutpt.inits)}
 
-
+TSLogit_Data <- NLA2007[!is.na(NLA2007[,"SECMEAN"]) & !is.na(NLA2007[,"EvergreenPer_3000m"]),]
 # Removing the missing values:
-TSLogit_Data <- Model[!is.na(Model[,"SECMEAN"]) & !is.na(Model[,"EvergreenPer_3000m"]),]
+# TSLogit_Data <- Model[!is.na(Model[,"SECMEAN"]) & !is.na(Model[,"EvergreenPer_3000m"]),]
 # replacing 0's to avoid Inf when logit transformed setting epsilon to half of the smallest non-zero value and replacing all 0 values with epsilon and all 1 values with 1-epsilon. Then apply the logit transformation.
-EvergreenPer_3000m <- TSLogit_Data[,"EvergreenPer_3000m"]/100
-min( TSLogit_Data[,"EvergreenPer_3000m"][TSLogit_Data[,"EvergreenPer_3000m"]!=min(TSLogit_Data[,"EvergreenPer_3000m"])] )/100
-EvergreenPer_3000m[EvergreenPer_3000m ==0] <-0.0001/2
+# EvergreenPer_3000m <- TSLogit_Data[,"EvergreenPer_3000m"]/100
+# min( TSLogit_Data[,"EvergreenPer_3000m"][TSLogit_Data[,"EvergreenPer_3000m"]!=min(TSLogit_Data[,"EvergreenPer_3000m"])] )/100
+# EvergreenPer_3000m[EvergreenPer_3000m ==0] <-0.0001/2
 # logit(EvergreenPer_3000m)
 
 SDD.C <- as.numeric(scale(log(TSLogit_Data$SECMEAN), center = TRUE, scale = TRUE))
@@ -354,14 +339,15 @@ PTL.C <- as.numeric(scale(log(TSLogit_Data$PTL), center = TRUE, scale = TRUE))
 Latitude.C <- as.numeric(scale((TSLogit_Data$AlbersY), center = TRUE, scale = TRUE))
 Elevation.C <- as.numeric(scale((TSLogit_Data$ELEV_PT), center = TRUE, scale = TRUE))
 
-DataList = list('TS'=factor(TSLogit_Data[,"TS_CHLA_4"])
-                ,'SD'=SDD.C
-                ,'Nitrogen'=NTL.C
-                ,'Phosphorus'=PTL.C
-                ,'Elevation'=Elevation.C
-                ,'Evergreen'= logit(EvergreenPer_3000m)
-                ,'Eco_Region'=factor(TSLogit_Data[,"WSA_ECO9"])
-                ,'Latitude'=Latitude.C)
+DataList = list('TS' = factor(TSLogit_Data[,"TS_CHLA_4"])
+                ,'SD' = SDD.C
+                ,'Nitrogen' = NTL.C
+                ,'Phosphorus' = PTL.C
+                ,'Elevation' = Elevation.C
+                ,'Evergreen' =  TSLogit_Data[,"EvergreenPer_3000m"]/100
+                ,'Eco_Region' = factor(TSLogit_Data[,"WSA_ECO9"])
+                ,'Latitude' = Latitude.C)
+
 
 #The parameter(s) to be monitored
 parameters = c('alpha_SD', 'alpha_N', 'alpha_P', 'alpha_E'
@@ -391,7 +377,7 @@ nIter = ceiling( ( numSavedSteps * thinSteps ) / nChains )
 
 # Start the clock!
 ptm <- proc.time()
-JAGS.TS.N <- jags.model('TSLogit.R',data = DataList 
+JAGS.TSLogit <- jags.model('TSLogit.R',data = DataList 
                         , inits, n.chains = nChains, n.adapt = adaptSteps)
 # Stop the clock
 proc.time() - ptm
@@ -400,7 +386,7 @@ proc.time() - ptm
 #################################################################
 # Start the clock!
 ptm <- proc.time()
-Coda.TS.N <- coda.samples(JAGS.TS.N, parameters, n.iter=100000)
+Coda.TS.N <- coda.samples(JAGS.TSLogit, parameters, n.iter=100000)
 # Stop the clock
 proc.time() - ptm
 #################################################################
