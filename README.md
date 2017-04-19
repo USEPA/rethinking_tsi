@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.556175.svg)](https://doi.org/10.5281/zenodo.556175)
+
 # rethinking_tsi
 
 This repository contains the code required for reproducing the analysis in:
