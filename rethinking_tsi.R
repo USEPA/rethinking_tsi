@@ -1,39 +1,34 @@
-##################################################
-##################################################
-library("gridExtra")
-library("autocrop")
-library("viridis")
-library("wesanderson")
-library("knitr")
-library("ggplot2")
-library("sp")
-library("rgdal")
-library("e1071")
-library("dplyr")
-library("tidyr")
-library("condprob2")
-library("party")
-library("broom")
-library("edarf")
-library("caret")
-library("randomForest")
-library("doParallel")
-library("arm")
-library("coda")
-library("rjags")
-library("xtable")
-devtools::install_github("USEPA/LakeTrophicModelling",quick=TRUE)
-library("LakeTrophicModelling")
-##################################################
+################################################################################
+# 1. Setup
+################################################################################
+pkgs <- c("devtools", "randomForest", "dplyr", "rjags", "arm", "xtable","caret",
+          "ggplot2","knitr")
+cran_no <- pkgs[!pkgs %in% installed.packages()[,1]]
+for(i in cran_no){
+  install.packages(i)
+}
+gh_pkgs <- c("usepa/LakeTrophicModelling")
+gh_no <- gh_pkgs[!basename(gh_pkgs) %in% installed.packages()[,1]]
+for(i in gh_no){
+  devtools::install_github(i)
+}
+all_pkgs <- c(basename(gh_pkgs),pkgs)
+lapply(all_pkgs, library, character.only = T)
+
+################################################################################
+# 2. Data
+################################################################################
+
 data(LakeTrophicModelling)
+
 ##################################################
 #All Variables
 #Clean Up Data - Complete Cases
 predictors_all <- predictors_all[predictors_all!="DATE_COL"]
-
 all_dat <- data.frame(ltmData[predictors_all],LogCHLA=log10(ltmData$CHLA))
 row.names(all_dat)<-ltmData$NLA_ID
 all_dat <- all_dat[complete.cases(all_dat),]  
+
 ##################################################
 #GIS Variables
 #Clean Up Data - Complete Cases
@@ -47,8 +42,15 @@ row.names(gis_dat_PTL)<-ltmData$NLA_ID
 # gis_dat <- gis_dat[complete.cases(gis_dat),]
 gis_dat_NTL <- gis_dat_NTL[complete.cases(gis_dat_NTL),]
 gis_dat_PTL <- gis_dat_PTL[complete.cases(gis_dat_PTL),]
+
+################################################################################
+# 3. Random Forest for Variable Selection
+################################################################################
+
 ##################################################
-# Variable Selection
+#Model 1: All (GIS + WQ) Variables
+#Variable Selection
+
 all_vs <- varsel_regression_rf(all_dat$LogCHLA,all_dat[,names(all_dat)!="LogCHLA"]
                                , ntree=5000,prog=T)  
 
@@ -61,10 +63,10 @@ all_vars_select <- unlist(all_vs$vars[19])
 all_rf<-randomForest(y=all_dat$LogCHLA,x=all_dat[,all_vars_select]
                      , ntree=5000, importance=TRUE, proximity=TRUE
                      , keep.forest=TRUE,keep.inbag=TRUE)
+
 ##################################################
 #Model 2: GIS Only Variables
 #Variable Selection
-##################################################
 gis_vs_NTL <- varsel_regression_rf(gis_dat_NTL$LogNTL
                                    , gis_dat_NTL[,names(gis_dat_NTL)!="LogNTL"]
                                    , ntree=5000,prog=T)
@@ -88,6 +90,9 @@ gis_rf_PTL<-randomForest(y=gis_dat_PTL$LogPTL
                          , ntree=5000,importance=TRUE,proximity=TRUE
                          , keep.forest=TRUE,keep.inbag=TRUE)
 
+################################################################################
+# 4. Random Forest for Variable Selection - Evaluation
+################################################################################
 
 data_def <- read.csv("data_def.csv", stringsAsFactors = FALSE)
 all_imp <- importance(all_rf)
@@ -114,68 +119,56 @@ dplyr::arrange(var_importance_NTL,desc(mean_decrease_gini))
 importancePlot(all_rf, data_def=data_def,type='gini',size=3)
 importancePlot(gis_rf_NTL, data_def=data_def,type='gini',size=3)
 importancePlot(gis_rf_PTL, data_def=data_def,type='gini',size=3)
+
 ##################################################
-#Register parallel backend for partial dependence
-co <- 100
-#################################################
 #All variables partial dependence
+co <- 100
 all_rf_turb_pd <- partialPlot(all_rf,all_dat,"TURB",n.pt=co,plot=FALSE)
 all_rf_ntl_pd <- partialPlot(all_rf,all_dat,"NTL",n.pt=co,plot=FALSE)
 all_rf_ptl_pd <- partialPlot(all_rf,all_dat,"PTL",n.pt=co,plot=FALSE)
 all_rf_elev_pd <- partialPlot(all_rf,all_dat,"ELEV_PT",n.pt=co,plot=FALSE)
 all_rf_AlberY_pd <- partialPlot(all_rf,all_dat,"AlbersY",n.pt=co,plot=FALSE)
-
 partial_plot(all_rf_turb_pd, x="Turbidity (NTU)"
              , y=expression(paste('Log10 Chl ', italic("a"),' (',mu,'g/L)')))
-
 partial_plot(all_rf_ntl_pd, x=expression(paste('Total Nitrogen',' (',mu,'g/L)'))
              , y=expression(paste('Log10 Chl ', italic("a"),' (',mu,'g/L)')))
 partial_plot(all_rf_ptl_pd, x=expression(paste('Total Phosporus',' (',mu,'g/L)'))
              , y=expression(paste('Log10 Chl ', italic("a"),' (',mu,'g/L)')))
 partial_plot(all_rf_elev_pd, x="Elevation (m)"
              , y=expression(paste('Log10 Chl ', italic("a"),' (',mu,'g/L)')))
-
 partial_plot(all_rf_AlberY_pd, x="AlbersY"
              , y=expression(paste('Log10 Chl ', italic("a"),' (',mu,'g/L)')))
-
-
 gis_rf_N_Lat_pd <- partialPlot(gis_rf_NTL,gis_dat_NTL,"AlbersY",n.pt=co,plot=FALSE)
 gis_rf_N_Evergreen_pd <- partialPlot(gis_rf_NTL,gis_dat_NTL,"EvergreenPer_3000m",n.pt=co,plot=FALSE)
 gis_rf_N_Eco_pd <- partialPlot(gis_rf_NTL,gis_dat_NTL,"WSA_ECO9",n.pt=co,plot=FALSE)
-
 gis_rf_N_Eco_pd$x <- factor(gis_rf_N_Eco_pd$x,levels=c("NAP","CPL","SAP","TPL","UMW","SPL","NPL","WMT","XER"),ordered=TRUE)
-
 partial_plot(gis_rf_N_Eco_pd, x="Ecoregion", 
              y=expression(paste('Log10 N ',' (',mu,'g/L)')))
-
 partial_plot(gis_rf_N_Lat_pd,
              x="Latitude",
              y=expression(paste('Log10 NTL ',' (',mu,'g/L)')))
-
 partial_plot(gis_rf_N_Evergreen_pd,
              x="%Evergreen",
              y=expression(paste('Log10 NTL ',' (',mu,'g/L)')))
-
 gis_rf_P_Lat_pd<- partialPlot(gis_rf_PTL,gis_dat_PTL,"AlbersY",n.pt=co,plot=FALSE)
 gis_rf_P_Evergreen_pd<- partialPlot(gis_rf_PTL,gis_dat_PTL,"EvergreenPer_3000m",n.pt=co,plot=FALSE)
 gis_rf_P_Eco_pd<- partialPlot(gis_rf_NTL,gis_dat_PTL,"WSA_ECO9",n.pt=co,plot=FALSE)
-
 gis_rf_P_Eco_pd$x <- factor(gis_rf_P_Eco_pd$x,levels=c("NAP","CPL","SAP","TPL","UMW","SPL","NPL","WMT","XER"),ordered=TRUE)
-
 partial_plot(gis_rf_P_Eco_pd, x="Ecoregion", 
              y=expression(paste('Log10 P',' (',mu,'g/L)')))
-
 partial_plot(gis_rf_P_Lat_pd,
              x="Latitude",
              y=expression(paste('Log10 PTL ',' (',mu,'g/L)')))
-
 partial_plot(gis_rf_P_Evergreen_pd,
              x="%Evergreen",
              y=expression(paste('Log10 PTL ',' (',mu,'g/L)')))
 
+################################################################################
+# 5.TSI POLR model
+################################################################################
+
 #################################################
 # Functions
-#################################################
 expected <- function(x, c1.5, c2.5, c3.5, sigma){
   p1.5 <- invlogit((x-c1.5)/sigma)
   p2.5 <- invlogit((x-c2.5)/sigma)
@@ -191,9 +184,11 @@ jitter.binary <- function(a, jitt=.05, up=1){
 logit <- function(x) return(log(x/(1-x)))
 
 invlogit <- function(x) return(1/(1+exp(-x)))
+
 #################################################
-# ConsistentTrophic State Classification using PTL, NTL, and SDD
-#################################################
+# ConsistentTrophic State Classification using 
+# PTL, NTL, and SDD
+
 NLA2007 <- ltmData
 Consistent <- ifelse((NLA2007$TS_CHLA_4==NLA2007$TS_PTL 
                       & NLA2007$TS_CHLA_4==NLA2007$TS_NTL), 1, 0)
@@ -211,6 +206,8 @@ TSI.polrAllVar <- bayespolr(factor(Model[,"TS_CHLA_4"])
                             + log(Model[,"PTL"])
                             + Model[,"ELEV_PT"])
 xtable(summary(TSI.polrAllVar)$coefficients[,1:2])
+
+#################################################
 # TSI.polrAllVar
 extractAIC(TSI.polrAllVar)
 
@@ -238,7 +235,7 @@ with(NLA2007,
      points(cbind(log(Model$SECMEAN), log(Model$NTL), log(Model$PTL), Model$ELEV_PT)%*%beta_AllVar,
             jitter.binary(as.numeric(ordered(Model$TS_CHLA_4))), col="cyan4"))
 
-######################################################
+#################################################
 summary(TSI.polrAllVar)
 beta_AllVar <- coef(TSI.polrAllVar)
 kappa_AllVar <- TSI.polrAllVar$zeta
@@ -253,7 +250,7 @@ TSI <- X%*% beta_AllVar
 TSI <- TSI[!is.na(TSI)]
 # se of kappas
 se.c <- summary(TSI.polrAllVar)$coef[5:7,2] 
-Ibcg <- seq(range(TSI)[1],range(TSI)[2],,50)
+Ibcg <- seq(range(TSI)[1],range(TSI)[2], length.out = 50)
 pA <- invlogit(kappa_AllVar[1] - Ibcg)
 pB <- invlogit(kappa_AllVar[2] - Ibcg) -  invlogit(kappa_AllVar[1] - Ibcg)
 pC <- invlogit(kappa_AllVar[3] - Ibcg) -  invlogit(kappa_AllVar[2] - Ibcg)
@@ -279,9 +276,10 @@ lines(Ibcg, pC, lty=3)
 lines(Ibcg, pNA, lty=4)
 legend(-6, 0.5, legend=c("Oligo", "Meso","Eu", "Hyper"),
        lty=1:4, cex=0.75, bty="n")
-#################################################
-# Evaluation
-#################################################
+
+################################################################################
+# 6. POLR Evaluation
+################################################################################
 predict.EvaluationAllVar <- (cbind(log(Evaluation[,"SECMEAN"])
                                    , log(Evaluation[,"NTL"])
                                    , log(Evaluation[,"PTL"])
@@ -289,7 +287,7 @@ predict.EvaluationAllVar <- (cbind(log(Evaluation[,"SECMEAN"])
 
 predict.EvaluationAllVar <- predict.EvaluationAllVar[!is.na(predict.EvaluationAllVar)]
 
-Predict.CatAllVar <-  vector(,length(predict.EvaluationAllVar))
+Predict.CatAllVar <-  vector(length = length(predict.EvaluationAllVar))
 
 for (i in 1:length(predict.EvaluationAllVar)){
   if (predict.EvaluationAllVar[i]< kappa_AllVar[1]) Predict.CatAllVar[i] <- "Oligo"
@@ -303,7 +301,6 @@ Pred.CatAllVar <- factor(Predict.CatAllVar, levels=c("Oligo", "Meso", "Eu", "Hyp
 True.CatAllVar <- Evaluation[, "TS_CHLA_4"]
 
 True.CatAllVar <- True.CatAllVar[!is.na(log(Evaluation$SECMEAN))]
-# str(True.CatAllVar)
 
 CM.AllVar <- confusionMatrix(Pred.CatAllVar, True.CatAllVar)
 CM.AllVar
@@ -311,10 +308,12 @@ CM.AllVar$byClass[,"Balanced Accuracy"]
 CM.AllVar$overall["Accuracy"]
 CMTable <- CM.AllVar$table
 xtable(CMTable)
-#################################################
-# JAGS Model
-#################################################
+
+################################################################################
+# 7. JAGS Model
+################################################################################
 set.seed(100)
+
 #set up the initializations 
 cutpt.inits <- array(dim= c(3))
 
@@ -325,6 +324,7 @@ for (k in 1:3){
 inits <- function () {list("cutpt_raw" = cutpt.inits)}
 
 TSLogit_Data <- NLA2007[!is.na(NLA2007[,"SECMEAN"]) & !is.na(NLA2007[,"EvergreenPer_3000m"]),]
+
 # Removing the missing values:
 # TSLogit_Data <- Model[!is.na(Model[,"SECMEAN"]) & !is.na(Model[,"EvergreenPer_3000m"]),]
 # replacing 0's to avoid Inf when logit transformed setting epsilon to half of the smallest non-zero value and replacing all 0 values with epsilon and all 1 values with 1-epsilon. Then apply the logit transformation.
@@ -381,15 +381,15 @@ JAGS.TSLogit <- jags.model('TSLogit.R',data = DataList
                         , inits, n.chains = nChains, n.adapt = adaptSteps)
 # Stop the clock
 proc.time() - ptm
-#################################################################
-#JAGS Model Diagnostics
-#################################################################
+################################################################################
+#8. JAGS Model Diagnostics
+################################################################################
 # Start the clock!
 ptm <- proc.time()
 Coda.TS.N <- coda.samples(JAGS.TSLogit, parameters, n.iter=100000)
 # Stop the clock
 proc.time() - ptm
-#################################################################
+#################################################
 plot(Coda.TS.N[,1:3])
 plot(Coda.TS.N[,4:6])
 plot(Coda.TS.N[,7:9])
@@ -402,9 +402,11 @@ plot(Coda.TS.N[,24:27])
 plot(Coda.TS.N[,29:30])
 
 print(xtable(cbind(summary(Coda.TS.N)$quantiles, summary(Coda.TS.N)$statistics[,2])), floating=FALSE)
-#################################################################
-###Model Evaluation
-#################################################################
+################################################################################
+#9. JAGS Model Evaluation
+################################################################################
+
+#################################################
 # 3 Chains Combined
 simCodaOne.Coda.TS.N <- NULL
 for (i in 1:1) simCodaOne.Coda.TS.N <- rbind(simCodaOne.Coda.TS.N, Coda.TS.N[[i]])
@@ -439,7 +441,7 @@ Eval.Elevation.C <- as.numeric(scale((Evaluation$ELEV_PT), center = TRUE, scale 
 predict.EvaluationAll <- (cbind(Eval.SDD.C, Eval.Elevation.C, Eval.NTL.C, Eval.PTL.C)) %*% Alpha[,"mean"]
 predict.EvaluationAll <- predict.EvaluationAll[!is.na(predict.EvaluationAll)]
 
-Predict.CatAll <-  vector(,length(predict.EvaluationAll))
+Predict.CatAll <-  vector(length = length(predict.EvaluationAll))
 C <- rbind(Coeff.TS.N.Summary["C[1]",],  Coeff.TS.N.Summary["C[2]",],  Coeff.TS.N.Summary["C[3]",])
 
 for (i in 1:length(predict.EvaluationAll)){
@@ -454,11 +456,10 @@ Pred.CatAll <- factor(Predict.CatAll, levels=c("Oligo", "Meso", "Eu", "Hyper"), 
 True.CatAll <- Evaluation[, "TS_CHLA_4"]
 
 True.CatAll <- True.CatAll[!is.na(log(Evaluation$SECMEAN))]
-# str(True.CatAll)
 
 CM.TS.Multilevel <- confusionMatrix(Pred.CatAll, True.CatAll)
 CM.TS.Multilevel
 xtable(CM.TS.Multilevel$table)
 CM.TS.Multilevel$overall["Accuracy"]
 CM.TS.Multilevel$byClass[,"Balanced Accuracy"]
-#################################################################
+
